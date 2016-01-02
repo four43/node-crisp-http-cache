@@ -1,0 +1,44 @@
+{
+  "name": "node-crisp-http-cache",
+  "version": "0.0.1",
+  "description": "Middleware providing a crispy fresh cache for HTTP responses. ",
+  "main": "main.js",
+  "scripts": {
+    "test": "mocha ./test --recursive",
+    "coverage": "istanbul cover ./node_modules/mocha/bin/_mocha -- -R spec ./test/*",
+    "coveralls": "npm run coverage && coveralls < coverage/lcov.info"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/four43/node-crisp-http-cache.git"
+  },
+  "keywords": [
+    "cache",
+    "http",
+    "middleware",
+    "tested",
+    "fresh",
+    "stale",
+    "crisp-cache"
+  ],
+  "author": "Seth Miller <seth@four43.com>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/four43/node-crisp-http-cache/issues"
+  },
+  "homepage": "https://github.com/four43/node-crisp-http-cache#readme",
+  "dependencies": {
+    "crisp-cache": "^1.0.0",
+    "debug": "^2.2.0",
+    "parse-cache-control": "^1.0.1"
+  },
+  "devDependencies": {
+    "coveralls": "^2.11.2",
+    "express": "^4.13.3",
+    "istanbul": "^0.3.18",
+    "mocha": "^2.1.0",
+    "mocha-lcov-reporter": "0.0.2",
+    "rewire": "^2.5.1",
+    "sinon": "^1.17.2"
+  }
+}
