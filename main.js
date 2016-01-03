@@ -181,7 +181,7 @@ function _compareCacheWithHeaders(req, cachedResponse, callback) {
 		}
 		if(req.get('accept-charset')) {
 			var contentTypeCharset = _parseContentTypeCharset(cachedResponse.get('content-type'))
-			if (!req.acceptsCharsets(contentTypeCharset)) {
+			if (contentTypeCharset && !req.acceptsCharsets(contentTypeCharset)) {
 				return callback(null, false);
 			}
 		}

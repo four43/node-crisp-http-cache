@@ -208,6 +208,26 @@ describe("compareCache", function () {
 				done();
 			});
 		});
+
+		it("Should use cache if charset wasn't provided in Content-Type", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept-Charset': 'utf-8, iso-8859-1;q=0.2'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+					'Content-Type': 'text/html'
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, true);
+				done();
+			});
+		});
 	});
 
 	describe("Encoding", function () {
