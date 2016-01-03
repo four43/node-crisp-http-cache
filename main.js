@@ -6,9 +6,10 @@ var CripsCache = require('crisp-cache'),
  *
  * @param {{}} options
  * @param {boolean} [options.enabled=true] A master switch of if we should cache or not, useful to set this to false while debugging.
- * @param {crispHttpCache~errFirstCallbackBool} [options.shouldCache="Always true"] An async function that should resolve with a boolean
- * @param {crispHttpCache~errFirstCallbackString} [options.getKey="Use original req URL as key"] An async function that should resolve with a string key based on the request/response.
- * @param {crispHttpCache~errFirstCallbackInt} [options.getTtl="Get from headers"] An async function that resolves with an integer for the TTL of response.
+ * @param {crispHttpCache~contextCallback} [options.shouldCache="Always true"] An async function that should resolve with a boolean
+ * @param {crispHttpCache~contextCallback} [options.getKey="Use original req URL as key"] An async function that should resolve with a string key based on the request/response.
+ * @param {crispHttpCache~contextCallback} [options.getTtl="Get from headers"] An async function that resolves with an integer for the TTL of response.
+ * @param {crispHttpCache~contextCallback} [options.compareCache="Use ETag and headers"] An async function that resolves with boolean if the cached version matches the request.
  * @param {{}} [options.cacheOptions] Caching options sent directly to crisp-cache
  *
  * @see https://github.com/four43/node-crisp-cache For crisp-cache options
@@ -21,6 +22,7 @@ function crispHttpCache(options) {
 	this.shouldCache = options.shouldCache || _shouldCacheAlways;
 	this.getKey = options.getKey || _getKeyOrigUrl;
 	this.getTtl = options.getTtl || _getTtlFromHeaders;
+	this.compareCache = options.compareCache || _compareCacheWithHeaders;
 
 	this.cacheOptions = options.cacheOptions || {};
 	if (!this.cacheOptions.fetcher) {
@@ -43,39 +45,55 @@ function crispHttpCache(options) {
 							return next(new Error("CrispHttpCache - Provided options.getKey function returned an error. Should return a string."));
 						}
 
+						var originalSend = res.send;
+						var cachedSend = function (body) {
+							if (res.statusCode < 200 || res.statusCode >= 300) {
+								debug("Non 2XX status code, not saving");
+								return originalSend.call(res, body);
+							}
+							debug("Setting cache: " + key);
+							var cachedEntry = {
+								status: res.statusCode,
+								headers: res._headers,
+								body: body
+							};
+
+							// Update cache entry's ttl
+							options.getTtl(req, res, (err, ttl) => {
+								debug(" - With TTL: " + ttl);
+								this.cache.set(key, cachedEntry, ttl);
+								originalSend.call(res, body);
+							});
+						};
+
 						this.cache.get(key, {skipFetch: true}, function (err, cacheValue) {
 							if (cacheValue) {
 								debug("Cache hit for: " + key);
-								//@todo compare ETags
-								res.set.call(res, cacheValue.headers);
-								return res.send.call(res, cacheValue.body);
+								cacheValue.get = _getHeaders.bind(cacheValue);
+								this.compareCache(req, cacheValue, function(err, cacheOkay) {
+									if(err) {
+										next(new Error("CrispHttpCache - Provided options.compareCache returned an error."));
+									}
+
+									if(cacheOkay) {
+										res.set.call(res, cacheValue.headers);
+										return res.send.call(res, cacheValue.body);
+									}
+									else {
+										debug("Cache values did not pass compareCache, re-running.");
+										res.send = cachedSend;
+										return next();
+									}
+								});
+
 							}
 							else {
 								debug("Cache miss for: " + key);
-								var originalSend = res.send;
-								res.send = function (body) {
-									if (res.statusCode < 200 || res.statusCode >= 300) {
-										debug("Non 2XX status code, not saving");
-										return originalSend.call(res, body);
-									}
-									debug("Setting cache: " + key);
-									var cachedEntry = {
-										status: res.statusCode,
-										headers: res._headers,
-										body: body
-									};
-
-									// Update cache entry's ttl
-									options.getTtl(req, res, (err, ttl) => {
-										debug(" - With TTL: " + ttl);
-										this.cache.set(key, cachedEntry, ttl);
-										originalSend.call(res, body);
-									});
-								};
+								res.send = cachedSend;
 								return next();
 							}
-						});
-					});
+						}.bind(this));
+					}.bind(this));
 				}
 				else {
 					//shouldCache function said we should skip caching.
@@ -96,6 +114,7 @@ function crispHttpCache(options) {
  * @param {{}} req The request object
  * @param {{}} res The response object
  * @param {crispHttpCache~errFirstCallbackBool} callback holding the result if we should cache or not.
+ * @private
  */
 function _shouldCacheAlways(req, res, callback) {
 	return callback(null, true);
@@ -106,7 +125,8 @@ function _shouldCacheAlways(req, res, callback) {
  * @param {{}} req The request object
  * @param {string} req.originalUrl The original URL of the request
  * @param {{}} res The response object
- * @param {function} callback will be called with (err, {string})
+ * @param {crispHttpCache~errFirstCallbackString} callback will be called with (err, {string})
+ * @private
  */
 function _getKeyOrigUrl(req, res, callback) {
 	return callback(null, req.originalUrl);
@@ -114,11 +134,13 @@ function _getKeyOrigUrl(req, res, callback) {
 
 /**
  * Parse Headers to get specific TTL for caching
- * @param req
- * @param res
- * @param {function} callback will be called with (err, {int}) (Milliseconds for TTL)
+ * @param {{}} req The request object
+ * @param {{}} res The response object
+ * @param {crispHttpCache~errFirstCallbackInt} callback will be called with (err, {int}) (Milliseconds for TTL)
+ * @private
  */
 function _getTtlFromHeaders(req, res, callback) {
+	//cache-control header always takes precedence over expires: http://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.9.3
 	if (res.get('cache-control')) {
 		var cacheControlInfo = parseCacheControl(res.get('cache-control'));
 
@@ -127,9 +149,11 @@ function _getTtlFromHeaders(req, res, callback) {
 		}
 
 		debug(cacheControlInfo);
-		if (cacheControlInfo['s-maxage']) {
+		var isPrivate = cacheControlInfo['private'] || cacheControlInfo['no-cache'] || cacheControlInfo['no-store'];
+		if (cacheControlInfo['s-maxage'] && !isPrivate) {
 			return callback(null, parseInt(cacheControlInfo['s-maxage']) * 1000);
 		}
+		return callback(null, 0);
 	}
 	else if (res.get('expires')) {
 		var now = new Date();
@@ -140,6 +164,29 @@ function _getTtlFromHeaders(req, res, callback) {
 	}
 }
 
+/**
+ *
+ * @param req
+ * @param cachedResponse
+ * @param {crispHttpCache~errFirstCallbackBool} callback holding the result if we should cache or not.
+ * @private
+ */
+function _compareCacheWithHeaders(req, cachedResponse, callback) {
+	//Accept
+	if(cachedResponse.get('content-encoding') && req.get('accept')) {
+		if(!req.accepts(cachedResponse.get('content-encoding'))) {
+			return callback(null, false);
+		}
+	}
+	//Accept-Encoding
+	//Accept-Language
+	//If-Modified-Since
+	//If-None-Match (ETag)
+}
+
+function _getHeaders(header) {
+	return this._headers[header.toLowerCase()];
+}
 
 module.exports = crispHttpCache;
 
@@ -163,20 +210,20 @@ module.exports = crispHttpCache;
  * An error first callback, boolean result
  * @callback crispHttpCache~errFirstCallbackBool
  * @param {Error} err
- * @param {boolean} result
+ * @param {boolean} [result]
  */
 
 /**
  * An error first callback, string result
  * @callback crispHttpCache~errFirstCallbackString
  * @param {Error} err
- * @param {string} result
+ * @param {string} [result]
  */
 
 /**
  * An error first callback, int result
  * @callback crispHttpCache~errFirstCallbackInt
  * @param {Error} err
- * @param {int} result
+ * @param {int} [result]
  */
 
