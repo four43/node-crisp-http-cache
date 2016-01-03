@@ -59,11 +59,11 @@ function crispHttpCache(options) {
 							};
 
 							// Update cache entry's ttl
-							options.getTtl(req, res, (err, ttl) => {
+							options.getTtl(req, res, function(err, ttl) {
 								debug(" - With TTL: " + ttl);
 								this.cache.set(key, cachedEntry, ttl);
 								originalSend.call(res, body);
-							});
+							}.bind(this));
 						};
 
 						this.cache.get(key, {skipFetch: true}, function (err, cacheValue) {
