@@ -173,19 +173,46 @@ function _getTtlFromHeaders(req, res, callback) {
  */
 function _compareCacheWithHeaders(req, cachedResponse, callback) {
 	//Accept
-	if(cachedResponse.get('content-encoding') && req.get('accept')) {
-		if(!req.accepts(cachedResponse.get('content-encoding'))) {
-			return callback(null, false);
+	if(cachedResponse.get('content-type')) {
+		if(req.get('accept')) {
+			if (!req.accepts(cachedResponse.get('content-type'))) {
+				return callback(null, false);
+			}
+		}
+		if(req.get('accept-charset')) {
+			var contentTypeCharset = _parseContentTypeCharset(cachedResponse.get('content-type'))
+			if (!req.acceptsCharsets(contentTypeCharset)) {
+				return callback(null, false);
+			}
 		}
 	}
 	//Accept-Encoding
+	if(cachedResponse.get('content-encoding') && req.get('accept-encoding')) {
+		if(!req.acceptsEncodings(cachedResponse.get('content-encoding'))) {
+			return callback(null, false);
+		}
+	}
 	//Accept-Language
+	if(cachedResponse.get('content-language') && req.get('accept-language')) {
+		if(!req.acceptsLanguages(cachedResponse.get('content-language'))) {
+			return callback(null, false);
+		}
+	}
 	//If-Modified-Since
 	//If-None-Match (ETag)
+	return callback(null, true);
 }
 
 function _getHeaders(header) {
 	return this._headers[header.toLowerCase()];
+}
+
+function _parseContentTypeCharset(contentTypeString) {
+	var matches = contentTypeString.match(/charset=(\S+)/);
+	if(matches) {
+		return matches[1];
+	}
+	return false;
 }
 
 module.exports = crispHttpCache;

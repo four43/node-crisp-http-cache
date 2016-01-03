@@ -106,23 +106,228 @@ describe("compareCache", function () {
 
 	var compareCacheWithHeaders = crispHttpCache.__get__("_compareCacheWithHeaders");
 
-	it("Should use cache if accept headers match", function (done) {
-		var mockRequest = new ExpressJsRequest({
-			headers: {
-				'Accept': 'gzip, deflate, sdch'
-			}
+	describe("Accept/Content-Type", function () {
+		it("Should use cache if accept headers match", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+					'Content-Type': 'text/html; charset=utf-8'
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, true);
+				done();
+			});
 		});
 
-		var mockCacheResponse = new ExpressJsResponse({
-			headers: {
-				'Content-Encoding': 'gzip'
-			}
+		it("Should use cache if accept headers match, not explicitly in list, */* parsing", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+					'Content-Type': 'image/png'
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, true);
+				done();
+			});
 		});
 
-		compareCacheWithHeaders(mockRequest, mockCacheResponse, function(err, shouldCache) {
-			assert.ifError(err);
-			assert.strictEqual(shouldCache, true);
-			done();
+		it("Should not use cache if accept headers match not in list", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept': 'image/png'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+					'Content-Type': 'application/json'
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, false);
+				done();
+			});
+		});
+	});
+
+	describe("Charset", function () {
+		it("Should use cache if accept-charset matches", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept-Charset': 'utf-8, iso-8859-1;q=0.2, utf-7;q=0.5'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+					'Content-Type': 'text/html; charset=utf-8'
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, true);
+				done();
+			});
+		});
+
+		it("Should not use cache if accept-charset doesn't matches", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept-Charset': 'utf-8, iso-8859-1;q=0.2'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+					'Content-Type': 'text/html; charset=utf-7'
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, false);
+				done();
+			});
+		});
+	});
+
+	describe("Encoding", function () {
+		it("Should use cache if accept-encoding headers match", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept-Encoding': 'gzip, deflate, sdch'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+					'Content-Encoding': 'gzip'
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, true);
+				done();
+			});
+		});
+
+		it("Should use cache if accept-encoding headers aren't set", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept-Encoding': 'gzip, deflate, sdch'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, true);
+				done();
+			});
+		});
+
+		it("Should not use cache if accept-encoding headers don't match", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept-Encoding': 'gzip, deflate, sdch'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+					'Content-Encoding': 'hippos'
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, false);
+				done();
+			});
+		});
+	});
+
+	describe("Content Language", function() {
+		it("Should use cache if accept-language headers match", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept-Language': 'en-US,en;q=0.8'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+					'Content-Language': 'en'
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, true);
+				done();
+			});
+		});
+
+		it("Should use cache if accept-language headers aren't set", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept-Language': 'en-US,en;q=0.8'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, true);
+				done();
+			});
+		});
+
+		it("Should skip cache if accept-encoding headers aren't set", function (done) {
+			var mockRequest = new ExpressJsRequest({
+				headers: {
+					'Accept-Language': 'en-US,en;q=0.8'
+				}
+			});
+
+			var mockCacheResponse = new ExpressJsResponse({
+				headers: {
+					'Content-Language': 'sp'
+				}
+			});
+
+			compareCacheWithHeaders(mockRequest, mockCacheResponse, function (err, shouldCache) {
+				assert.ifError(err);
+				assert.strictEqual(shouldCache, false);
+				done();
+			});
 		});
 	});
 });

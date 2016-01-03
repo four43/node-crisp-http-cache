@@ -18,4 +18,19 @@ ExpressJsRequest.prototype.accepts = function(){
 	return accept.types.apply(accept, arguments);
 };
 
+ExpressJsRequest.prototype.acceptsCharsets = function(){
+	var accept = accepts(this);
+	return accept.charsets.apply(accept, arguments);
+};
+
+ExpressJsRequest.prototype.acceptsEncodings = function(){
+	var accept = accepts(this);
+	return accept.encodings.apply(accept, arguments);
+};
+
+ExpressJsRequest.prototype.acceptsLanguages = function(){
+	var accept = accepts(this);
+	return accept.languages.apply(accept, arguments);
+};
+
 module.exports = ExpressJsRequest;
