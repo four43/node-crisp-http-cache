@@ -1,4 +1,7 @@
 function ExpressJsResponse(options) {
+	if(options === undefined) {
+		options = {};
+	}
 	this.statusCode = options.statusCode || 200;
 
 	this._headers = {};
@@ -11,6 +14,11 @@ function ExpressJsResponse(options) {
 
 ExpressJsResponse.prototype.get = function(header) {
 	return this._headers[header.toLowerCase()];
+};
+
+ExpressJsResponse.prototype.set = function(name, value) {
+	this._headers[name.toLowerCase()] = value;
+	return this;
 };
 
 module.exports = ExpressJsResponse;

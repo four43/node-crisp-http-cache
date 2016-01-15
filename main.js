@@ -1,15 +1,16 @@
-var CripsCache = require('crisp-cache'),
+var CrispCache = require('crisp-cache'),
 	debug = require('debug')('crisp-http-cache'),
 	parseCacheControl = require('parse-cache-control');
 
 /**
  *
- * @param {{}} options
+ * @param {{}} [options]
  * @param {boolean} [options.enabled=true] A master switch of if we should cache or not, useful to set this to false while debugging.
  * @param {crispHttpCache~contextCallback} [options.shouldCache="Always true"] An async function that should resolve with a boolean
  * @param {crispHttpCache~contextCallback} [options.getKey="Use original req URL as key"] An async function that should resolve with a string key based on the request/response.
  * @param {crispHttpCache~contextCallback} [options.getTtl="Get from headers"] An async function that resolves with an integer for the TTL of response.
- * @param {crispHttpCache~contextCallback} [options.compareCache="Use ETag and headers"] An async function that resolves with boolean if the cached version matches the request.
+ * @param {crispHttpCache~contextCallback} [options.compareCache="Use Headers to make sure this entry applies to request"] An async function that resolves with boolean if the cached version matches the request.
+ * @param {crispHttpCache~contextCallback} [options.cacheClientMatch="Check ETag"] An async function that resolves with a boolean if the cached version is the exact version the client is requesting.
  * @param {{}} [options.cacheOptions] Caching options sent directly to crisp-cache
  *
  * @see https://github.com/four43/node-crisp-cache For crisp-cache options
@@ -17,12 +18,16 @@ var CripsCache = require('crisp-cache'),
  * @return {crispHttpCache~middleware}
  */
 function crispHttpCache(options) {
+	if (options === undefined) {
+		options = {};
+	}
 	this.enabled = (options.enabled !== undefined) ? options.enabled : true;
 
 	this.shouldCache = options.shouldCache || _shouldCacheAlways;
 	this.getKey = options.getKey || _getKeyOrigUrl;
 	this.getTtl = options.getTtl || _getTtlFromHeaders;
 	this.compareCache = options.compareCache || _compareCacheWithHeaders;
+	this.cacheClientMatch = options.cacheClientMatch || _matchModifiedOrETag;
 
 	this.cacheOptions = options.cacheOptions || {};
 	if (!this.cacheOptions.fetcher) {
@@ -30,7 +35,7 @@ function crispHttpCache(options) {
 			cb(new Error("Fetcher not defined yet."));
 		}
 	}
-	this.cache = new CrispCache(options.cacheOptions);
+	this.cache = new CrispCache(this.cacheOptions);
 
 	return function (req, res, next) {
 		if (this.enabled) {
@@ -45,6 +50,7 @@ function crispHttpCache(options) {
 							return next(new Error("CrispHttpCache - Provided options.getKey function returned an error. Should return a string."));
 						}
 
+						//Setup our cached send function.
 						var originalSend = res.send;
 						var cachedSend = function (body) {
 							if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -58,26 +64,31 @@ function crispHttpCache(options) {
 								body: body
 							};
 
-							// Update cache entry's ttl
-							options.getTtl(req, res, function(err, ttl) {
+							// Update cache entry's ttl, set and send.
+							this.getTtl(req, res, function (err, ttl) {
 								debug(" - With TTL: " + ttl);
-								this.cache.set(key, cachedEntry, ttl);
+								this.cache.set(key, cachedEntry, {expiresTtl: ttl});
 								originalSend.call(res, body);
 							}.bind(this));
-						};
+						}.bind(this);
 
 						this.cache.get(key, {skipFetch: true}, function (err, cacheValue) {
 							if (cacheValue) {
 								debug("Cache hit for: " + key);
 								cacheValue.get = _getHeaders.bind(cacheValue);
-								this.compareCache(req, cacheValue, function(err, cacheOkay) {
-									if(err) {
+								this.compareCache(req, cacheValue, function (err, cacheOkay) {
+									if (err) {
 										next(new Error("CrispHttpCache - Provided options.compareCache returned an error."));
 									}
 
-									if(cacheOkay) {
-										res.set.call(res, cacheValue.headers);
-										return res.send.call(res, cacheValue.body);
+									if (cacheOkay) {
+										this.cacheClientMatch(req, cacheValue, function (err, cachedExactMatch) {
+											if (cachedExactMatch) {
+												return res.send(304);
+											}
+											res.set.call(res, cacheValue.headers);
+											return res.send.call(res, cacheValue.body);
+										});
 									}
 									else {
 										debug("Cache values did not pass compareCache, re-running.");
@@ -122,6 +133,7 @@ function _shouldCacheAlways(req, res, callback) {
 
 /**
  * Get our cache key based on our request's original request URL.
+ *
  * @param {{}} req The request object
  * @param {string} req.originalUrl The original URL of the request
  * @param {{}} res The response object
@@ -134,6 +146,7 @@ function _getKeyOrigUrl(req, res, callback) {
 
 /**
  * Parse Headers to get specific TTL for caching
+ *
  * @param {{}} req The request object
  * @param {{}} res The response object
  * @param {crispHttpCache~errFirstCallbackInt} callback will be called with (err, {int}) (Milliseconds for TTL)
@@ -165,6 +178,7 @@ function _getTtlFromHeaders(req, res, callback) {
 }
 
 /**
+ * Compare what we have cached with what the user requested, is this cached request applicable to this request?
  *
  * @param req
  * @param cachedResponse
@@ -173,13 +187,13 @@ function _getTtlFromHeaders(req, res, callback) {
  */
 function _compareCacheWithHeaders(req, cachedResponse, callback) {
 	//Accept
-	if(cachedResponse.get('content-type')) {
-		if(req.get('accept')) {
+	if (cachedResponse.get('content-type')) {
+		if (req.get('accept')) {
 			if (!req.accepts(cachedResponse.get('content-type'))) {
 				return callback(null, false);
 			}
 		}
-		if(req.get('accept-charset')) {
+		if (req.get('accept-charset')) {
 			var contentTypeCharset = _parseContentTypeCharset(cachedResponse.get('content-type'))
 			if (contentTypeCharset && !req.acceptsCharsets(contentTypeCharset)) {
 				return callback(null, false);
@@ -187,29 +201,77 @@ function _compareCacheWithHeaders(req, cachedResponse, callback) {
 		}
 	}
 	//Accept-Encoding
-	if(cachedResponse.get('content-encoding') && req.get('accept-encoding')) {
-		if(!req.acceptsEncodings(cachedResponse.get('content-encoding'))) {
+	if (cachedResponse.get('content-encoding') && req.get('accept-encoding')) {
+		if (!req.acceptsEncodings(cachedResponse.get('content-encoding'))) {
 			return callback(null, false);
 		}
 	}
 	//Accept-Language
-	if(cachedResponse.get('content-language') && req.get('accept-language')) {
-		if(!req.acceptsLanguages(cachedResponse.get('content-language'))) {
+	if (cachedResponse.get('content-language') && req.get('accept-language')) {
+		if (!req.acceptsLanguages(cachedResponse.get('content-language'))) {
 			return callback(null, false);
 		}
 	}
-	//If-Modified-Since
-	//If-None-Match (ETag)
 	return callback(null, true);
 }
 
+/**
+ * Strictly compare what we have cached with what the user requested, is this cached request the version the user has already?
+ *
+ * @param req
+ * @param cachedResponse
+ * @param {crispHttpCache~errFirstCallbackBool} callback holding the result if we should cache or not.
+ * @private
+ */
+function _matchModifiedOrETag(req, cachedResponse, callback) {
+	//If-Modified-Since
+	if (cachedResponse.get('date') && req.get('if-modified-since')) {
+		if (new Date(cachedResponse.get('date')) <= new Date(req.get('if-modified-since'))) {
+			return callback(null, true);
+		}
+	}
+	//If-None-Match (ETag)
+	if (cachedResponse.get('etag') && req.get('if-none-match')) {
+		if (cachedResponse.get('etag') === req.get('if-none-match')) {
+			return callback(null, true);
+		}
+	}
+
+	//No existing cache information provided, the client doesn't seem to have this content yet.
+	return callback(null, false);
+}
+
+function _transformHeaders(response, res) {
+	var responseCacheControl = response.get('cache-control'),
+		responseExpires = response.get('expires'),
+		expiresDeltaSeconds = 0;
+	if (responseExpires && responseExpires instanceof Date) {
+		expiresDeltaSeconds = Math.round((responseExpires.getTime() - Date.now()) / 1000);
+	}
+
+	if (responseCacheControl) {
+		res.set('cache-control', responseCacheControl);
+	}
+	else {
+		res.set('cache-control', 'public, max-age=' + expiresDeltaSeconds + ', s-maxage=' + expiresDeltaSeconds);
+	}
+
+	if (responseExpires !== Infinity) {
+		res.set('expires', responseExpires);
+	}
+
+	if (!response.get('date')) {
+		res.set('date', new Date());
+	}
+}
+
 function _getHeaders(header) {
-	return this._headers[header.toLowerCase()];
+	return this.headers[header.toLowerCase()];
 }
 
 function _parseContentTypeCharset(contentTypeString) {
 	var matches = contentTypeString.match(/charset=(\S+)/);
-	if(matches) {
+	if (matches) {
 		return matches[1];
 	}
 	return false;

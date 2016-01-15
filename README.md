@@ -22,6 +22,9 @@ This scenario is a little more difficult, as it requires guessing. Those guesses
 3. **Never Expires** - 
 If you have content that is a fixed resource that you know will never change and should remain active forever, you may set that resource to be cached for 1 year. This should be used very conservatively as many resources may be edited or removed, think DMCA takedown requests, or users want to go back and delete uploaded content. Few things are forever.
 
+4. **Never Cache** -
+Constantly changing data or data that is private shouldn't be cached.
+
 ## Examples
 
 In all cases we will serve content to consumers with the best indication of expiration. This includes returning 304s and not re-serving content, where available.
@@ -38,6 +41,9 @@ An unknown expiration is best dealt with using "stale" data. You can serve some 
 
 #### Never Expires
 Set the "expires" header to the Javascript constant "Infinity" to tell `crisp-http-cache` to never expire. `crisp-http-cache` will automatically convert headers to comply with the recommended spec of 1 year. It will also cache the entry in `crisp-cache` to last forever (unless otherwise specified) so it can be served quickly.
+
+#### Never Cache
+Fairly easy, set the expires header to 0.
 
 
 ## Reference
