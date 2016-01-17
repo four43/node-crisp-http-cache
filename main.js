@@ -241,27 +241,54 @@ function _matchModifiedOrETag(req, cachedResponse, callback) {
 	return callback(null, false);
 }
 
-function _transformHeaders(response, res) {
+
+function _transformHeaders(response, res, estExpiresInterval) {
 	var responseCacheControl = response.get('cache-control'),
 		responseExpires = response.get('expires'),
-		expiresDeltaSeconds = 0;
-	if (responseExpires && responseExpires instanceof Date) {
-		expiresDeltaSeconds = Math.round((responseExpires.getTime() - Date.now()) / 1000);
+		responseDate = response.get('date'),
+		expiresDeltaMs = 0;
+
+	//Known expiration
+	if (responseExpires) {
+		if (responseExpires instanceof Date) {
+			expiresDeltaMs = Math.round((responseExpires.getTime() - Date.now()));
+		}
+		else if (responseExpires === Infinity) {
+			expiresDeltaMs = 31622400000; // 1 year
+		}
+		else {
+			//If it's an integer, assume it's delta ms.
+			expiresDeltaMs = responseExpires;
+		}
 	}
+	else {
+		if(responseDate && estExpiresInterval) {
+			expiresDeltaMs = estExpiresInterval;
+		}
+	}
+
 
 	if (responseCacheControl) {
 		res.set('cache-control', responseCacheControl);
 	}
 	else {
+		var expiresDeltaSeconds = Math.round(expiresDeltaMs / 1000);
 		res.set('cache-control', 'public, max-age=' + expiresDeltaSeconds + ', s-maxage=' + expiresDeltaSeconds);
 	}
 
-	if (responseExpires !== Infinity) {
-		res.set('expires', responseExpires);
+	if(expiresDeltaMs > 0) {
+		res.set('expires', new Date(Date.now() + expiresDeltaMs));
+	}
+	else{
+		//HTTP Spec specifies if the response should immediately expired, a 0 is allowed.
+		res.set('expires', 0);
 	}
 
-	if (!response.get('date')) {
+	if (!responseDate) {
 		res.set('date', new Date());
+	}
+	else {
+		res.set('date', responseDate);
 	}
 }
 

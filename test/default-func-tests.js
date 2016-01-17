@@ -9,8 +9,12 @@ var SECOND = 1000,
 
 var crispHttpCache = rewire("../main");
 
-assert.equalDate = function(dateA, dateB, message) {
-	return assert.equal(dateA.getTime(), dateB.getTime(), message);
+var equalOrig = assert.equal;
+assert.equal = function(actual, expected, message) {
+	if(actual instanceof Date && expected instanceof Date) {
+		return equalOrig(actual.getTime(), expected.getTime(), message);
+	}
+	return equalOrig.apply(this, arguments);
 };
 
 describe("shouldCache", function () {
@@ -148,7 +152,7 @@ describe("transformHeaders", function () {
 		transformHeaders(origResponse, res);
 		assert.equal(res.get('cache-control'), 'private, max-age=300');
 		assert.equal(res.get('expires'), expiresDate);
-		assert.equalDate(res.get('date'), new Date());
+		assert.equal(res.get('date'), new Date());
 	});
 
 	describe("Known Expiration", function () {
@@ -164,16 +168,58 @@ describe("transformHeaders", function () {
 			transformHeaders(origResponse, res);
 			assert.equal(res.get('cache-control'), 'public, max-age=' + deltaSeconds + ', s-maxage=' + deltaSeconds);
 			assert.equal(res.get('expires'), expiresDate);
-			assert.equalDate(res.get('date'), new Date());
+			assert.equal(res.get('date'), new Date());
+		});
+
+		it("should handle an integer expiration as ms.", function () {
+			var deltaSeconds = 10 * 60;
+			var expiresDate = new Date(Date.now() + deltaSeconds*1000);
+			var origResponse = new ExpressJsResponse({
+				headers: {
+					'expires': deltaSeconds * 1000
+				}
+			});
+			transformHeaders(origResponse, res);
+			assert.equal(res.get('cache-control'), 'public, max-age=' + deltaSeconds + ', s-maxage=' + deltaSeconds);
+			assert.equal(res.get('expires'), expiresDate);
+			assert.equal(res.get('date'), new Date());
 		});
 
 	});
 
 	describe("Unknown Expiration", function () {
 
+		it("should handle an integer expiration as ms.", function () {
+			var intervalSeconds = 5 * 60;
+			var expiresDate = new Date(Date.now() + intervalSeconds*1000);
+			var origResponse = new ExpressJsResponse({
+				headers: {
+					'date': new Date()
+				}
+			});
+			transformHeaders(origResponse, res, intervalSeconds * 1000);
+			assert.equal(res.get('cache-control'), 'public, max-age=' + intervalSeconds + ', s-maxage=' + intervalSeconds);
+			assert.equal(res.get('expires'), expiresDate);
+			assert.equal(res.get('date'), new Date());
+		});
+
 	});
 
 	describe("Never Expires", function () {
+
+		it("should set output headers according to the spec", function () {
+			var deltaSeconds = 31622400; //Seconds in a year
+			var estExpiresDate = new Date(Date.now() + deltaSeconds*1000);
+			var origResponse = new ExpressJsResponse({
+				headers: {
+					'expires': Infinity
+				}
+			});
+			transformHeaders(origResponse, res);
+			assert.equal(res.get('cache-control'), 'public, max-age=' + deltaSeconds + ', s-maxage=' + deltaSeconds);
+			assert.equal(res.get('expires'), estExpiresDate);
+			assert.equal(res.get('date'), new Date());
+		});
 
 	});
 
@@ -189,7 +235,7 @@ describe("transformHeaders", function () {
 			assert.equal(res.get('cache-control'), 'public, max-age=' + 0 + ', s-maxage=' + 0);
 			//Date is normally expected here but the spec has a special meaning for "0" meaning expire immediately.
 			assert.equal(res.get('expires'), 0);
-			assert.equalDate(res.get('date'), new Date());
+			assert.equal(res.get('date'), new Date());
 		});
 
 	});
