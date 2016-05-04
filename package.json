@@ -30,6 +30,7 @@
   "dependencies": {
     "crisp-cache": "^1.0.0",
     "debug": "^2.2.0",
+    "on-finished": "^2.3.0",
     "parse-cache-control": "^1.0.1"
   },
   "devDependencies": {
