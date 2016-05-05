@@ -143,15 +143,15 @@ describe("transformHeaders", function () {
 
 	it("shouldn't override set headers", function () {
 		var expiresDate = new Date(Date.now() + 300 * SECOND);
-		var origResponse = new ExpressJsResponse({
+		var res = new ExpressJsResponse({
 			headers: {
 				'cache-control': 'private, max-age=300',
 				'expires': expiresDate
 			}
 		});
-		transformHeaders(origResponse, res);
+		transformHeaders(res);
 		assert.equal(res.get('cache-control'), 'private, max-age=300');
-		assert.equal(res.get('expires'), expiresDate);
+		assert.equal(res.get('expires'), expiresDate.toUTCString());
 		assert.equal(res.get('date'), new Date());
 	});
 
@@ -159,13 +159,13 @@ describe("transformHeaders", function () {
 
 		it("should set output headers for a known expiration", function () {
 			var deltaSeconds = 10 * 60;
-			var expiresDate = new Date(Date.now() + deltaSeconds*1000);
-			var origResponse = new ExpressJsResponse({
+			var expiresDate = new Date(Date.now() + deltaSeconds*1000).toUTCString();
+			var res = new ExpressJsResponse({
 				headers: {
 					'expires': expiresDate
 				}
 			});
-			transformHeaders(origResponse, res);
+			transformHeaders(res);
 			assert.equal(res.get('cache-control'), 'public, max-age=' + deltaSeconds + ', s-maxage=' + deltaSeconds);
 			assert.equal(res.get('expires'), expiresDate);
 			assert.equal(res.get('date'), new Date());
@@ -173,13 +173,13 @@ describe("transformHeaders", function () {
 
 		it("should handle an integer expiration as ms.", function () {
 			var deltaSeconds = 10 * 60;
-			var expiresDate = new Date(Date.now() + deltaSeconds*1000);
-			var origResponse = new ExpressJsResponse({
+			var expiresDate = new Date(Date.now() + deltaSeconds*1000).toUTCString();
+			var res = new ExpressJsResponse({
 				headers: {
 					'expires': deltaSeconds * 1000
 				}
 			});
-			transformHeaders(origResponse, res);
+			transformHeaders(res);
 			assert.equal(res.get('cache-control'), 'public, max-age=' + deltaSeconds + ', s-maxage=' + deltaSeconds);
 			assert.equal(res.get('expires'), expiresDate);
 			assert.equal(res.get('date'), new Date());
@@ -191,13 +191,13 @@ describe("transformHeaders", function () {
 
 		it("should handle an integer expiration as ms.", function () {
 			var intervalSeconds = 5 * 60;
-			var expiresDate = new Date(Date.now() + intervalSeconds*1000);
-			var origResponse = new ExpressJsResponse({
+			var expiresDate = new Date(Date.now() + intervalSeconds*1000).toUTCString();
+			var res = new ExpressJsResponse({
 				headers: {
 					'date': new Date()
 				}
 			});
-			transformHeaders(origResponse, res, intervalSeconds * 1000);
+			transformHeaders(res, intervalSeconds * 1000);
 			assert.equal(res.get('cache-control'), 'public, max-age=' + intervalSeconds + ', s-maxage=' + intervalSeconds);
 			assert.equal(res.get('expires'), expiresDate);
 			assert.equal(res.get('date'), new Date());
@@ -209,13 +209,13 @@ describe("transformHeaders", function () {
 
 		it("should set output headers according to the spec", function () {
 			var deltaSeconds = 31622400; //Seconds in a year
-			var estExpiresDate = new Date(Date.now() + deltaSeconds*1000);
-			var origResponse = new ExpressJsResponse({
+			var estExpiresDate = new Date(Date.now() + deltaSeconds*1000).toUTCString();
+			var res = new ExpressJsResponse({
 				headers: {
 					'expires': Infinity
 				}
 			});
-			transformHeaders(origResponse, res);
+			transformHeaders(res);
 			assert.equal(res.get('cache-control'), 'public, max-age=' + deltaSeconds + ', s-maxage=' + deltaSeconds);
 			assert.equal(res.get('expires'), estExpiresDate);
 			assert.equal(res.get('date'), new Date());
@@ -226,13 +226,13 @@ describe("transformHeaders", function () {
 	describe("Never Cache", function () {
 
 		it("should set output headers for immediate expiration", function () {
-			var origResponse = new ExpressJsResponse({
+			var res = new ExpressJsResponse({
 				headers: {
 					'expires': 0
 				}
 			});
-			transformHeaders(origResponse, res);
-			assert.equal(res.get('cache-control'), 'public, max-age=' + 0 + ', s-maxage=' + 0);
+			transformHeaders(res);
+			assert.equal(res.get('cache-control'), 'public, max-age=0, s-maxage=0');
 			//Date is normally expected here but the spec has a special meaning for "0" meaning expire immediately.
 			assert.equal(res.get('expires'), 0);
 			assert.equal(res.get('date'), new Date());

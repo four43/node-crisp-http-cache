@@ -12,6 +12,7 @@ var CrispCache = require('crisp-cache'),
  * @param {crispHttpCache~contextCallback} [options.getTtl="Get from headers"] An async function that resolves with an integer for the TTL of response.
  * @param {crispHttpCache~contextCallback} [options.compareCache="Use Headers to make sure this entry applies to request"] An async function that resolves with boolean if the cached version matches the request.
  * @param {crispHttpCache~contextCallback} [options.cacheClientMatch="Check ETag"] An async function that resolves with a boolean if the cached version is the exact version the client is requesting.
+ * @param {crispHttpCache~contextCallback} [options.transformHeaders] Tries to normalize expires headers for expiration.
  * @param {{}} [options.cacheOptions] Caching options sent directly to crisp-cache
  *
  * @see https://github.com/four43/node-crisp-cache For crisp-cache options
@@ -29,6 +30,7 @@ function crispHttpCache(options) {
 	this.getTtl = options.getTtl || _getTtlFromHeaders;
 	this.compareCache = options.compareCache || _compareCacheWithHeaders;
 	this.cacheClientMatch = options.cacheClientMatch || _matchModifiedOrETag;
+	this.transformHeaders = options.transformHeaders || _transformHeaders;
 
 	this.cacheOptions = options.cacheOptions || {};
 	if (!this.cacheOptions.fetcher) {
@@ -71,7 +73,7 @@ function crispHttpCache(options) {
 									}
 									else {
 										debug("Cache values did not pass compareCache, re-running.");
-										interceptRes(req, res, key, this.getTtl, this.cache);
+										interceptRes(req, res, key, this.getTtl, this.cache, this.transformHeaders);
 										return next();
 									}
 								});
@@ -79,7 +81,7 @@ function crispHttpCache(options) {
 							}
 							else {
 								debug("Cache miss for: " + key);
-								interceptRes(req, res, key, this.getTtl, this.cache);
+								interceptRes(req, res, key, this.getTtl, this.cache, this.transformHeaders);
 								return next();
 							}
 						}.bind(this));
@@ -100,6 +102,10 @@ function crispHttpCache(options) {
 
 function interceptRes(req, res, key, getTtl, cache) {
 	saveBody(res);
+	preFinish(res, function(res, data, cb) {
+		this.transformHeaders(res);
+		cb(null, res);
+	});
 	onFinished(res, function (err, res) {
 		if (res.statusCode < 200 || res.statusCode >= 300) {
 			debug("Non 2XX status code, not saving");
@@ -118,6 +124,17 @@ function interceptRes(req, res, key, getTtl, cache) {
 			cache.set(key, cachedEntry, {size: res.body.length, expiresTtl: ttl});
 		});
 	});
+}
+
+function preFinish(res, cb) {
+	var origSend = res.send;
+
+	res.send = function(data) {
+		var sendArgs = arguments;
+		cb(res, data, function(err, res) {
+			origSend.apply(res, sendArgs);
+		});
+	}
 }
 
 function saveBody(res) {
@@ -265,14 +282,14 @@ function _matchModifiedOrETag(req, cachedResponse, callback) {
 }
 
 
-function _transformHeaders(response, res, estExpiresInterval) {
-	var responseCacheControl = response.get('cache-control'),
-		responseExpires = response.get('expires'),
-		responseDate = response.get('date'),
+function _transformHeaders(res, estExpiresInterval) {
+	var responseCacheControl = res.get('cache-control'),
+		responseExpires = _parseDateString(res.get('expires')),
+		responseDate = res.get('date'),
 		expiresDeltaMs = 0;
 
 	//Known expiration
-	if (responseExpires) {
+	if (responseExpires !== undefined) {
 		if (responseExpires instanceof Date) {
 			expiresDeltaMs = Math.round((responseExpires.getTime() - Date.now()));
 		}
@@ -300,7 +317,7 @@ function _transformHeaders(response, res, estExpiresInterval) {
 	}
 
 	if (expiresDeltaMs > 0) {
-		res.set('expires', new Date(Date.now() + expiresDeltaMs));
+		res.set('expires', new Date(Date.now() + expiresDeltaMs).toUTCString());
 	}
 	else {
 		//HTTP Spec specifies if the response should immediately expired, a 0 is allowed.
@@ -312,6 +329,20 @@ function _transformHeaders(response, res, estExpiresInterval) {
 	}
 	else {
 		res.set('date', responseDate);
+	}
+}
+
+function _parseDateString(date) {
+	if(date === 'Infinity') {
+		return Infinity;
+	}
+	else if(!isNaN(parseInt(date))) {
+		return parseFloat(date);
+	} else if(!isNaN(Date.parse(date))) {
+		return new Date(date);
+	}
+	else {
+		return date;
 	}
 }
 

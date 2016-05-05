@@ -61,6 +61,17 @@ describe("Express Middleware", function() {
 			});
 	});
 
+	it("should be infinity", function(done) {
+		request(app)
+			.get('/inf')
+			.expect('Expires', 'Sat, 02 Jan 1971 00:00:01 GMT')
+			.expect(200)
+			.end(function(err, res) {
+				if (err) throw done(err);
+				done();
+			});
+	});
+
 	it("should be respect max size", function(done) {
 		async.parallel([
 			(cb) => {
@@ -108,6 +119,11 @@ function setupExpress(app) {
 
 	app.get('/world', function(req, res) {
 		res.set('expires', new Date(Date.now() + 10000).toUTCString());
+		res.send("World! " + (new Date).toISOString());
+	});
+
+	app.get('/inf', function(req, res) {
+		res.set('expires', Infinity);
 		res.send("World! " + (new Date).toISOString());
 	});
 }
