@@ -1,5 +1,6 @@
 var CrispCache = require('crisp-cache'),
 	debug = require('debug')('crisp-http-cache'),
+	onFinished = require('on-finished'),
 	parseCacheControl = require('parse-cache-control');
 
 /**
@@ -11,6 +12,7 @@ var CrispCache = require('crisp-cache'),
  * @param {crispHttpCache~contextCallback} [options.getTtl="Get from headers"] An async function that resolves with an integer for the TTL of response.
  * @param {crispHttpCache~contextCallback} [options.compareCache="Use Headers to make sure this entry applies to request"] An async function that resolves with boolean if the cached version matches the request.
  * @param {crispHttpCache~contextCallback} [options.cacheClientMatch="Check ETag"] An async function that resolves with a boolean if the cached version is the exact version the client is requesting.
+ * @param {crispHttpCache~contextCallback} [options.transformHeaders] Tries to normalize expires headers for expiration.
  * @param {{}} [options.cacheOptions] Caching options sent directly to crisp-cache
  *
  * @see https://github.com/four43/node-crisp-cache For crisp-cache options
@@ -28,6 +30,7 @@ function crispHttpCache(options) {
 	this.getTtl = options.getTtl || _getTtlFromHeaders;
 	this.compareCache = options.compareCache || _compareCacheWithHeaders;
 	this.cacheClientMatch = options.cacheClientMatch || _matchModifiedOrETag;
+	this.transformHeaders = options.transformHeaders || _transformHeaders;
 
 	this.cacheOptions = options.cacheOptions || {};
 	if (!this.cacheOptions.fetcher) {
@@ -50,28 +53,6 @@ function crispHttpCache(options) {
 							return next(new Error("CrispHttpCache - Provided options.getKey function returned an error. Should return a string."));
 						}
 
-						//Setup our cached send function.
-						var originalSend = res.send;
-						var cachedSend = function (body) {
-							if (res.statusCode < 200 || res.statusCode >= 300) {
-								debug("Non 2XX status code, not saving");
-								return originalSend.call(res, body);
-							}
-							debug("Setting cache: " + key);
-							var cachedEntry = {
-								status: res.statusCode,
-								headers: res._headers,
-								body: body
-							};
-
-							// Update cache entry's ttl, set and send.
-							this.getTtl(req, res, function (err, ttl) {
-								debug(" - With TTL: " + ttl);
-								this.cache.set(key, cachedEntry, {expiresTtl: ttl});
-								originalSend.call(res, body);
-							}.bind(this));
-						}.bind(this);
-
 						this.cache.get(key, {skipFetch: true}, function (err, cacheValue) {
 							if (cacheValue) {
 								debug("Cache hit for: " + key);
@@ -84,7 +65,7 @@ function crispHttpCache(options) {
 									if (cacheOkay) {
 										this.cacheClientMatch(req, cacheValue, function (err, cachedExactMatch) {
 											if (cachedExactMatch) {
-												return res.send(304);
+												return res.sendStatus(304);
 											}
 											res.set.call(res, cacheValue.headers);
 											return res.send.call(res, cacheValue.body);
@@ -92,7 +73,7 @@ function crispHttpCache(options) {
 									}
 									else {
 										debug("Cache values did not pass compareCache, re-running.");
-										res.send = cachedSend;
+										interceptRes(req, res, key, this.getTtl, this.cache, this.transformHeaders);
 										return next();
 									}
 								});
@@ -100,7 +81,7 @@ function crispHttpCache(options) {
 							}
 							else {
 								debug("Cache miss for: " + key);
-								res.send = cachedSend;
+								interceptRes(req, res, key, this.getTtl, this.cache, this.transformHeaders);
 								return next();
 							}
 						}.bind(this));
@@ -117,6 +98,65 @@ function crispHttpCache(options) {
 			return next();
 		}
 	}.bind(this);
+}
+
+function interceptRes(req, res, key, getTtl, cache) {
+	saveBody(res);
+	preFinish(res, function(res, data, cb) {
+		this.transformHeaders(res);
+		cb(null, res);
+	});
+	onFinished(res, function (err, res) {
+		if (res.statusCode < 200 || res.statusCode >= 300) {
+			debug("Non 2XX status code, not saving");
+			return;
+		}
+		debug("Setting cache: " + key);
+		var cachedEntry = {
+			status:  res.statusCode,
+			headers: res._headers,
+			body:    res.body
+		};
+
+		// Update cache entry's ttl, set and send.
+		getTtl(req, res, function (err, ttl) {
+			debug(" - With TTL: " + ttl);
+			cache.set(key, cachedEntry, {size: res.body.length, expiresTtl: ttl});
+		});
+	});
+}
+
+function preFinish(res, cb) {
+	var origSend = res.send;
+
+	res.send = function(data) {
+		var sendArgs = arguments;
+		cb(res, data, function(err, res) {
+			origSend.apply(res, sendArgs);
+		});
+	}
+}
+
+function saveBody(res) {
+	var oldWrite = res.write,
+		oldEnd = res.end;
+
+	var chunks = [];
+
+	// Intercept write
+	res.write = function (chunk) {
+		chunks.push(chunk);
+		oldWrite.apply(res, arguments);
+	};
+
+	// Intercept end
+	res.end = function (chunk) {
+		if (chunk)
+			chunks.push(chunk);
+
+		res.body = Buffer.concat(chunks);
+		oldEnd.apply(res, arguments);
+	};
 }
 
 /**
@@ -242,14 +282,14 @@ function _matchModifiedOrETag(req, cachedResponse, callback) {
 }
 
 
-function _transformHeaders(response, res, estExpiresInterval) {
-	var responseCacheControl = response.get('cache-control'),
-		responseExpires = response.get('expires'),
-		responseDate = response.get('date'),
+function _transformHeaders(res, estExpiresInterval) {
+	var responseCacheControl = res.get('cache-control'),
+		responseExpires = _parseDateString(res.get('expires')),
+		responseDate = res.get('date'),
 		expiresDeltaMs = 0;
 
 	//Known expiration
-	if (responseExpires) {
+	if (responseExpires !== undefined) {
 		if (responseExpires instanceof Date) {
 			expiresDeltaMs = Math.round((responseExpires.getTime() - Date.now()));
 		}
@@ -262,7 +302,7 @@ function _transformHeaders(response, res, estExpiresInterval) {
 		}
 	}
 	else {
-		if(responseDate && estExpiresInterval) {
+		if (responseDate && estExpiresInterval) {
 			expiresDeltaMs = estExpiresInterval;
 		}
 	}
@@ -276,10 +316,10 @@ function _transformHeaders(response, res, estExpiresInterval) {
 		res.set('cache-control', 'public, max-age=' + expiresDeltaSeconds + ', s-maxage=' + expiresDeltaSeconds);
 	}
 
-	if(expiresDeltaMs > 0) {
-		res.set('expires', new Date(Date.now() + expiresDeltaMs));
+	if (expiresDeltaMs > 0) {
+		res.set('expires', new Date(Date.now() + expiresDeltaMs).toUTCString());
 	}
-	else{
+	else {
 		//HTTP Spec specifies if the response should immediately expired, a 0 is allowed.
 		res.set('expires', 0);
 	}
@@ -289,6 +329,20 @@ function _transformHeaders(response, res, estExpiresInterval) {
 	}
 	else {
 		res.set('date', responseDate);
+	}
+}
+
+function _parseDateString(date) {
+	if(date === 'Infinity') {
+		return Infinity;
+	}
+	else if(!isNaN(parseInt(date))) {
+		return parseFloat(date);
+	} else if(!isNaN(Date.parse(date))) {
+		return new Date(date);
+	}
+	else {
+		return date;
 	}
 }
 
