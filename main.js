@@ -2,6 +2,8 @@ var CrispCache = require('crisp-cache'),
 	debug = require('debug')('crisp-http-cache'),
 	parseCacheControl = require('parse-cache-control');
 
+var CrispHttpCacheError = require('./lib/error/CrispHttpCacheError');
+
 /**
  *
  * @param {{}} [options]
@@ -28,11 +30,12 @@ function crispHttpCache(options) {
 	this.getTtl = options.getTtl || _getTtlFromHeaders;
 	this.compareCache = options.compareCache || _compareCacheWithHeaders;
 	this.cacheClientMatch = options.cacheClientMatch || _matchModifiedOrETag;
+	this.transformHeaders = options.transformHeaders || _transformHeaders;
 
 	this.cacheOptions = options.cacheOptions || {};
 	if (!this.cacheOptions.fetcher) {
 		this.cacheOptions.fetcher = function (key, cb) {
-			cb(new Error("Fetcher not defined yet."));
+			cb(new CrispHttpCacheError("Fetcher not defined yet."));
 		}
 	}
 	this.cache = new CrispCache(this.cacheOptions);
@@ -41,13 +44,13 @@ function crispHttpCache(options) {
 		if (this.enabled) {
 			this.shouldCache(req, res, function (err, shouldCache) {
 				if (err) {
-					return next(new Error("CrispHttpCache - Provided options.shouldCache function returned an error."));
+					return next(new CrispHttpCacheError("responseExpireProvided options.shouldCache function returned an error."));
 				}
 
 				if (shouldCache) {
 					this.getKey(req, res, function (err, key) {
 						if (err || typeof key !== 'string' || key.length === 0) {
-							return next(new Error("CrispHttpCache - Provided options.getKey function returned an error. Should return a string."));
+							return next(new CrispHttpCacheError("responseExpireProvided options.getKey function returned an error. Should return a string."));
 						}
 
 						//Setup our cached send function.
@@ -58,6 +61,9 @@ function crispHttpCache(options) {
 								return originalSend.call(res, body);
 							}
 							debug("Setting cache: " + key);
+
+							this.transformHeaders(res, res);
+
 							var cachedEntry = {
 								status: res.statusCode,
 								headers: res._headers,
@@ -72,13 +78,14 @@ function crispHttpCache(options) {
 							}.bind(this));
 						}.bind(this);
 
+						//Check Cache
 						this.cache.get(key, {skipFetch: true}, function (err, cacheValue) {
 							if (cacheValue) {
 								debug("Cache hit for: " + key);
 								cacheValue.get = _getHeaders.bind(cacheValue);
 								this.compareCache(req, cacheValue, function (err, cacheOkay) {
 									if (err) {
-										next(new Error("CrispHttpCache - Provided options.compareCache returned an error."));
+										next(new CrispHttpCacheError("responseExpireProvided options.compareCache returned an error."));
 									}
 
 									if (cacheOkay) {
@@ -158,7 +165,7 @@ function _getTtlFromHeaders(req, res, callback) {
 		var cacheControlInfo = parseCacheControl(res.get('cache-control'));
 
 		if (!cacheControlInfo) {
-			return callback(new Error('Failed to implement HTTP caching: failed to parse cache control headers'));
+			return callback(new CrispHttpCacheError('Failed to implement HTTP caching: failed to parse cache control headers'));
 		}
 
 		debug(cacheControlInfo);
@@ -173,7 +180,7 @@ function _getTtlFromHeaders(req, res, callback) {
 		return callback(null, new Date(res.get('expires')).getTime() - now.getTime());
 	}
 	else {
-		callback(new Error("Could not get TTL via headers"));
+		callback(new CrispHttpCacheError("Could not get TTL via headers"));
 	}
 }
 
@@ -258,7 +265,7 @@ function _transformHeaders(response, res, estExpiresInterval) {
 		}
 		else {
 			//If it's an integer, assume it's delta ms.
-			expiresDeltaMs = responseExpires;
+			expiresDeltaMs = parseInt(responseExpires);
 		}
 	}
 	else {
@@ -266,7 +273,6 @@ function _transformHeaders(response, res, estExpiresInterval) {
 			expiresDeltaMs = estExpiresInterval;
 		}
 	}
-
 
 	if (responseCacheControl) {
 		res.set('cache-control', responseCacheControl);

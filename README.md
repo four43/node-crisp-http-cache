@@ -25,7 +25,7 @@ If you have content that is a fixed resource that you know will never change and
 4. **Never Cache** -
 Constantly changing data or data that is private shouldn't be cached.
 
-## Examples
+### Examples
 
 In all cases we will serve content to consumers with the best indication of expiration. This includes returning 304s and not re-serving content, where available.
 
@@ -43,7 +43,8 @@ An unknown expiration is best dealt with using "stale" data. You can serve some 
 Set the "expires" header to the Javascript constant "Infinity" to tell `crisp-http-cache` to never expire. `crisp-http-cache` will automatically convert headers to comply with the recommended spec of 1 year. It will also cache the entry in `crisp-cache` to last forever (unless otherwise specified) so it can be served quickly.
 
 #### Never Cache
-Fairly easy, set the expires header to 0.
+Fairly easy, set the expires header to 0, the corresponding `cache-control` and `expires` headers will be set to 0
+
 
 
 ## Reference
@@ -52,8 +53,4 @@ Fairly easy, set the expires header to 0.
 * Heroku Recommendations: https://devcenter.heroku.com/articles/increasing-application-performance-with-http-cache-headers
 
 ## Todo
-Send cache-control - Enables caching, must send
-
-Should Send Expires - Browser will not check resource over network until after expires
-
-Send last-modified
+Use `crisp-cache`'s prefetch ability, via stale state, to get new content before we have to wait for expired data.
