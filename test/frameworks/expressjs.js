@@ -1,6 +1,6 @@
 var assert = require('assert'),
 	async = require('async'),
-	crispHttpCache = require('../../main'),
+	CrispHttpCache = require('../../main'),
 	express = require('express'),
 	request = require('supertest'),
 	sinon = require('sinon');
@@ -106,11 +106,14 @@ describe("Express Middleware", function () {
 });
 
 function setupExpress(app) {
-	app.use(crispHttpCache({
+
+	var cache = new CrispHttpCache({
 		cacheOptions: {
 			maxSize: 50
 		}
-	}));
+	});
+
+	app.use(cache.getExpressMiddleware());
 
 	app.get('/hello', function (req, res) {
 		res.set('expires', new Date(Date.now() + 30000).toUTCString());

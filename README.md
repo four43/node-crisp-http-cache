@@ -16,13 +16,14 @@ This will cache the response for 30 seconds, as described by the expires header.
 ```javascript
 // Express.js Web Server
 var app = require('express')(),
-    crispHttpCache = require('crisp-http-cache');
-    
-app.use(crispHttpCache({
-    cacheOptions: {
-        maxSize: 50
-    }
-}));
+    CrispHttpCache = require('crisp-http-cache');
+
+var cache = new CrispHttpCache({
+   cacheOptions: {
+       maxSize: 50
+   }
+});
+app.use(cache.getExpressMiddleware());
 
 app.get('/hello', function (req, res) {
     res.set('expires', new Date(Date.now() + 30000).toUTCString());
@@ -37,6 +38,8 @@ var listener = app.listen(9001, function() {
 `crisp-http-cache` is an HTTP caching middleware that determines it's TTL based on standard HTTP headers, so it will transform our `expires` header response into a 30 second TTL and will also set the `cache-control` header, as per HTTP recommendation. 
 
 ## Options
+
+`crisp-http-cache` should be instantiated and the following options can be passed in an object to configure the cache. The middleware can be accessed by calling the getter corresponding to your desired framework.
 
 | Option | Type | Default | Description |
 | ------ | ---- | ------- | ----------- |

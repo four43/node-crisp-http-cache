@@ -19,7 +19,7 @@ var CrispCache = require('crisp-cache'),
  *
  * @return {crispHttpCache~middleware}
  */
-function crispHttpCache(options) {
+function CrispHttpCache(options) {
 	if (options === undefined) {
 		options = {};
 	}
@@ -39,7 +39,9 @@ function crispHttpCache(options) {
 		}
 	}
 	this.cache = new CrispCache(this.cacheOptions);
+}
 
+CrispHttpCache.prototype.getExpressMiddleware = function () {
 	return function (req, res, next) {
 		if (this.enabled) {
 			this.shouldCache(req, res, function (err, shouldCache) {
@@ -73,15 +75,15 @@ function crispHttpCache(options) {
 									}
 									else {
 										debug("Cache values did not pass compareCache, re-running.");
-										interceptRes(req, res, key, this.getTtl, this.cache, this.transformHeaders);
+										this._interceptRes(req, res, key, this.getTtl, this.cache, this.transformHeaders);
 										return next();
 									}
-								});
+								}.bind(this));
 
 							}
 							else {
 								debug("Cache miss for: " + key);
-								interceptRes(req, res, key, this.getTtl, this.cache, this.transformHeaders);
+								this._interceptRes(req, res, key, this.getTtl, this.cache, this.transformHeaders);
 								return next();
 							}
 						}.bind(this));
@@ -91,21 +93,21 @@ function crispHttpCache(options) {
 					//shouldCache function said we should skip caching.
 					return next();
 				}
-			});
+			}.bind(this));
 		}
 		else {
 			//Caching disabled, skip
 			return next();
 		}
 	}.bind(this);
-}
+};
 
-function interceptRes(req, res, key, getTtl, cache) {
+CrispHttpCache.prototype._interceptRes = function(req, res, key, getTtl, cache) {
 	saveBody(res);
-	preFinish(res, function(res, data, cb) {
+	preFinish(res, function (res, data, cb) {
 		this.transformHeaders(res);
 		cb(null, res);
-	});
+	}.bind(this));
 	onFinished(res, function (err, res) {
 		if (res.statusCode < 200 || res.statusCode >= 300) {
 			debug("Non 2XX status code, not saving");
@@ -121,17 +123,22 @@ function interceptRes(req, res, key, getTtl, cache) {
 		// Update cache entry's ttl, set and send.
 		getTtl(req, res, function (err, ttl) {
 			debug(" - With TTL: " + ttl);
-			cache.set(key, cachedEntry, {size: res.body.length, expiresTtl: ttl});
+			// If we didn't get a hangup, we can cache it.
+			if (res.body && res.body.length) {
+				cache.set(key, cachedEntry, {size: res.body.length, expiresTtl: ttl});
+			}
 		});
 	});
-}
+};
+
+module.exports = CrispHttpCache;
 
 function preFinish(res, cb) {
 	var origSend = res.send;
 
-	res.send = function(data) {
+	res.send = function (data) {
 		var sendArgs = arguments;
-		cb(res, data, function(err, res) {
+		cb(res, data, function (err, res) {
 			origSend.apply(res, sendArgs);
 		});
 	}
@@ -334,12 +341,12 @@ function _transformHeaders(res, estExpiresInterval) {
 }
 
 function _parseDateString(date) {
-	if(date === 'Infinity') {
+	if (date === 'Infinity') {
 		return Infinity;
 	}
-	else if(!isNaN(parseInt(date))) {
+	else if (!isNaN(parseInt(date))) {
 		return parseFloat(date);
-	} else if(!isNaN(Date.parse(date))) {
+	} else if (!isNaN(Date.parse(date))) {
 		return new Date(date);
 	}
 	else {
@@ -358,8 +365,6 @@ function _parseContentTypeCharset(contentTypeString) {
 	}
 	return false;
 }
-
-module.exports = crispHttpCache;
 
 /**
  * A function that is provided with the current context of the request
