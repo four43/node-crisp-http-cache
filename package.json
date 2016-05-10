@@ -1,5 +1,5 @@
 {
-  "name": "node-crisp-http-cache",
+  "name": "crisp-http-cache",
   "version": "0.0.1",
   "description": "Middleware providing a crispy fresh cache for HTTP responses. ",
   "main": "main.js",
