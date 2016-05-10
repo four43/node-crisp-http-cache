@@ -32,11 +32,12 @@ describe("getKey", function () {
 	var getKeyOrigUrl = crispHttpCache.__get__("_getKeyOrigUrl");
 	it("Should use the request's originalUrl", function (done) {
 		var req = {
+			method: "GET",
 			originalUrl: "hello/world.avi"
 		};
 		getKeyOrigUrl(req, null, function (err, result) {
 			assert.ifError(err);
-			assert.strictEqual(result, "hello/world.avi");
+			assert.strictEqual(result, "GEThello/world.avi");
 			done();
 		});
 	});
