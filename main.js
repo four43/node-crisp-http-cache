@@ -121,7 +121,10 @@ function interceptRes(req, res, key, getTtl, cache) {
 		// Update cache entry's ttl, set and send.
 		getTtl(req, res, function (err, ttl) {
 			debug(" - With TTL: " + ttl);
-			cache.set(key, cachedEntry, {size: res.body.length, expiresTtl: ttl});
+			// If we didn't get a hangup, we can cache it.
+			if(res.body && res.body.length) {
+				cache.set(key, cachedEntry, {size: res.body.length, expiresTtl: ttl});
+			}
 		});
 	});
 }
