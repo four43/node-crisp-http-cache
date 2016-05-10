@@ -1,13 +1,15 @@
-var crispHttpCache = require('../main'),
+var CrispHttpCache = require('../main'),
 	express = require('express');
 
 var app = express();
 
-app.use(crispHttpCache({
+var cache = new CrispHttpCache({
 	cacheOptions: {
 		maxSize: 50
 	}
-}));
+});
+
+app.use(cache.getExpressMiddleware());
 
 app.get('/hello', function(req, res) {
 	res.set('expires', new Date(Date.now() + 30000));
