@@ -176,12 +176,13 @@ function _shouldCacheAlways(req, res, callback) {
  *
  * @param {{}} req The request object
  * @param {string} req.originalUrl The original URL of the request
+ * @param {string} req.method The HTTP verb used to create this response
  * @param {{}} res The response object
  * @param {crispHttpCache~errFirstCallbackString} callback will be called with (err, {string})
  * @private
  */
 function _getKeyOrigUrl(req, res, callback) {
-	return callback(null, req.originalUrl);
+	return callback(null, req.method + req.originalUrl);
 }
 
 /**
