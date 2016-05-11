@@ -1,6 +1,6 @@
 {
   "name": "crisp-http-cache",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Middleware providing a crispy fresh cache for HTTP responses. ",
   "main": "main.js",
   "scripts": {

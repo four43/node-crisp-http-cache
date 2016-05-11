@@ -60,6 +60,14 @@ The full set of [crisp-cache options](https://github.com/four43/node-crisp-cache
 * `evictCheckInterval` (integer, ms) - Will check for expired cache entries and delete them from the cache.
 * `events` (object) - Configurable event object, useful for stats and debugging.
 
+## Methods
+
+### getExpressMiddleware()
+Returns an Express Middleware style function, `function(req,res,next)` that will cache an HTTP endpoint by adding it to an Express stack.
+
+### getUsage()
+Returns the usage of the cache when using size constraints. It is just a proxy to the [crisp-cache](https://github.com/four43/node-crisp-cache) method.
+
 ## Caching Theory
 
 Caching helps in all scenarios if done properly, but that last part is the kicker. There are a few prominent scenarios:

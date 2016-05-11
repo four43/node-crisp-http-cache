@@ -39,11 +39,11 @@ function CrispHttpCache(options) {
 		}
 	}
 
-	this.cache = new CrispCache(this.cacheOptions);
+	this.backend = new CrispCache(this.cacheOptions);
 }
 
 CrispHttpCache.prototype.getUsage = function() {
-	return this.cache.getUsage();
+	return this.backend.getUsage();
 };
 
 CrispHttpCache.prototype.getExpressMiddleware = function () {
@@ -60,7 +60,7 @@ CrispHttpCache.prototype.getExpressMiddleware = function () {
 							return next(new Error("CrispHttpCache - Provided options.getKey function returned an error. Should return a string."));
 						}
 
-						this.cache.get(key, {skipFetch: true}, function (err, cacheValue) {
+						this.backend.get(key, {skipFetch: true}, function (err, cacheValue) {
 							if (cacheValue) {
 								debug("Cache hit for: " + key);
 								cacheValue.get = _getHeaders.bind(cacheValue);
@@ -80,7 +80,7 @@ CrispHttpCache.prototype.getExpressMiddleware = function () {
 									}
 									else {
 										debug("Cache values did not pass compareCache, re-running.");
-										this._interceptRes(req, res, key, this.getTtl, this.cache, this.transformHeaders);
+										this._interceptRes(req, res, key, this.getTtl, this.backend, this.transformHeaders);
 										return next();
 									}
 								}.bind(this));
@@ -88,7 +88,7 @@ CrispHttpCache.prototype.getExpressMiddleware = function () {
 							}
 							else {
 								debug("Cache miss for: " + key);
-								this._interceptRes(req, res, key, this.getTtl, this.cache, this.transformHeaders);
+								this._interceptRes(req, res, key, this.getTtl, this.backend, this.transformHeaders);
 								return next();
 							}
 						}.bind(this));
