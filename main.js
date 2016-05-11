@@ -88,7 +88,18 @@ CrispHttpCache.prototype.getExpressMiddleware = function () {
 							}
 							else {
 								debug("Cache miss for: " + key);
-								this._interceptRes(req, res, key, this.getTtl, this.backend, this.transformHeaders);
+								if(this.backend._lock(key, function(){})
+								) {
+									// We are the first to hit this key, go fetch
+									this._interceptRes(req, res, key, this.getTtl, this.backend, this.transformHeaders);
+								}
+								else {
+									this.backend._lock(key, function(key, cacheValue) {
+										res.set.call(res, cacheValue.headers);
+										return res.send.call(res, cacheValue.body);
+									});
+									return;
+								}
 								return next();
 							}
 						}.bind(this));

@@ -103,6 +103,30 @@ describe("Express Middleware", function () {
 					});
 			});
 	});
+
+	it("should lock and only request once", function (done) {
+		async.parallel([
+				function (cb) {
+					request(app)
+						.get('/hello')
+						.expect('Expires', 'Thu, 01 Jan 1970 00:00:31 GMT')
+						.expect(200)
+						.end(cb);
+				},
+				function (cb) {
+					request(app)
+						.get('/hello')
+						.expect('Expires', 'Thu, 01 Jan 1970 00:00:31 GMT')
+						.expect(200)
+						.end(cb);
+				}
+			],
+			function (err, results) {
+				if (err) return done(err);
+				assert.equal(app.testControllers.hello.callCount, 1);
+				done();
+			});
+	});
 });
 
 function setupExpress(app) {
@@ -115,18 +139,24 @@ function setupExpress(app) {
 
 	app.use(cache.getExpressMiddleware());
 
-	app.get('/hello', function (req, res) {
-		res.set('expires', new Date(Date.now() + 30000).toUTCString());
-		res.send("Hello! " + (new Date).toISOString());
-	});
+	app.testControllers = {
+		hello: sinon.spy(function (req, res) {
+			res.set('expires', new Date(Date.now() + 30000).toUTCString());
+			res.send("Hello! " + (new Date).toISOString());
+		}),
+		world: sinon.spy(function (req, res) {
+			res.set('expires', new Date(Date.now() + 10000).toUTCString());
+			res.send("World! " + (new Date).toISOString());
+		}),
+		inf: sinon.spy(function (req, res) {
+			res.set('expires', Infinity);
+			res.send("World! " + (new Date).toISOString());
+		})
+	};
 
-	app.get('/world', function (req, res) {
-		res.set('expires', new Date(Date.now() + 10000).toUTCString());
-		res.send("World! " + (new Date).toISOString());
-	});
+	app.get('/hello', app.testControllers.hello);
 
-	app.get('/inf', function (req, res) {
-		res.set('expires', Infinity);
-		res.send("World! " + (new Date).toISOString());
-	});
+	app.get('/world', app.testControllers.world);
+
+	app.get('/inf', app.testControllers.inf);
 }
