@@ -6,7 +6,7 @@ var CrispCache = require('crisp-cache'),
 /**
  *
  * @param {{}} [options]
- * @param {boolean} [options.enabled=true] A master switch of if we should cache or not, useful to set this to false while debugging.
+ * @param {boolean|undefined} [options.enabled=true] A master switch of if we should cache or not, useful to set this to false while debugging.
  * @param {crispHttpCache~contextCallback} [options.shouldCache="Always true"] An async function that should resolve with a boolean
  * @param {crispHttpCache~contextCallback} [options.getKey="Use original req URL as key"] An async function that should resolve with a string key based on the request/response.
  * @param {crispHttpCache~contextCallback} [options.getTtl="Get from headers"] An async function that resolves with an integer for the TTL of response.
@@ -38,8 +38,13 @@ function CrispHttpCache(options) {
 			cb(new Error("Fetcher not defined yet."));
 		}
 	}
+
 	this.cache = new CrispCache(this.cacheOptions);
 }
+
+CrispHttpCache.prototype.getUsage = function() {
+	return this.cache.getUsage();
+};
 
 CrispHttpCache.prototype.getExpressMiddleware = function () {
 	return function (req, res, next) {

@@ -1,6 +1,6 @@
 {
   "name": "crisp-http-cache",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Middleware providing a crispy fresh cache for HTTP responses. ",
   "main": "main.js",
   "scripts": {
@@ -28,7 +28,7 @@
   },
   "homepage": "https://github.com/four43/node-crisp-http-cache#readme",
   "dependencies": {
-    "crisp-cache": "^1.0.0",
+    "crisp-cache": "^1.1.0",
     "debug": "^2.2.0",
     "on-finished": "^2.3.0",
     "parse-cache-control": "^1.0.1"
