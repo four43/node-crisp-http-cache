@@ -127,6 +127,30 @@ describe("Express Middleware", function () {
 				done();
 			});
 	});
+
+	it("should resolve locks on bad request (and not cache)", function (done) {
+		async.parallel([
+				function (cb) {
+					request(app)
+						.get('/four04')
+						.expect('Expires', 'Thu, 01 Jan 1970 00:00:31 GMT')
+						.expect(404)
+						.end(cb);
+				},
+				function (cb) {
+					request(app)
+						.get('/four04')
+						.expect('Expires', 'Thu, 01 Jan 1970 00:00:31 GMT')
+						.expect(404)
+						.end(cb);
+				}
+			],
+			function (err, results) {
+				if (err) return done(err);
+				assert.equal(app.testControllers.four04.callCount, 2);
+				done();
+			});
+	});
 });
 
 function setupExpress(app) {
@@ -151,6 +175,11 @@ function setupExpress(app) {
 		inf: sinon.spy(function (req, res) {
 			res.set('expires', Infinity);
 			res.send("World! " + (new Date).toISOString());
+		}),
+		four04: sinon.spy(function (req, res) {
+			res.set('expires', new Date(Date.now() + 30000).toUTCString());
+			res.sendStatus(404);
+			res.send("nope");
 		})
 	};
 
@@ -159,4 +188,6 @@ function setupExpress(app) {
 	app.get('/world', app.testControllers.world);
 
 	app.get('/inf', app.testControllers.inf);
+
+	app.get('/four04', app.testControllers.four04);
 }

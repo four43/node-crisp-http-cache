@@ -90,17 +90,20 @@ CrispHttpCache.prototype.getExpressMiddleware = function () {
 								debug("Cache miss for: " + key);
 								if(this.backend._lock(key, function(){})
 								) {
+									debug("- Got lock for: " + key);
 									// We are the first to hit this key, go fetch
 									this._interceptRes(req, res, key, this.getTtl, this.backend, this.transformHeaders);
+									return next();
 								}
 								else {
+									debug("- Waiting for lock: " + key);
 									this.backend._lock(key, function(key, cacheValue) {
+										debug("- Resolving lock: " + key);
 										res.set.call(res, cacheValue.headers);
 										return res.send.call(res, cacheValue.body);
 									});
 									return;
 								}
-								return next();
 							}
 						}.bind(this));
 					}.bind(this));
@@ -125,17 +128,18 @@ CrispHttpCache.prototype._interceptRes = function(req, res, key, getTtl, cache) 
 		cb(null, res);
 	}.bind(this));
 	onFinished(res, function (err, res) {
-		if (res.statusCode < 200 || res.statusCode >= 300) {
-			debug("Non 2XX status code, not saving");
-			return;
-		}
-		debug("Setting cache: " + key);
 		var cachedEntry = {
 			status:  res.statusCode,
 			headers: res._headers,
 			body:    res.body
 		};
 
+		if (res.statusCode < 200 || res.statusCode >= 300) {
+			debug("Non 2XX status code, not saving");
+			cache._resolveLocks(key, cachedEntry);
+			return;
+		}
+		debug("Setting cache: " + key);
 		// Update cache entry's ttl, set and send.
 		getTtl(req, res, function (err, ttl) {
 			debug(" - With TTL: " + ttl);
