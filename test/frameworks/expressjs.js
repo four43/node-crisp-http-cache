@@ -5,10 +5,10 @@ var assert = require('assert'),
 	request = require('supertest'),
 	sinon = require('sinon');
 
-describe("Express Middleware", function () {
+var app,
+	clock;
 
-	var app,
-		clock;
+describe("Express Middleware", function () {
 
 	beforeEach(function () {
 		clock = sinon.useFakeTimers(1000);
@@ -36,8 +36,21 @@ describe("Express Middleware", function () {
 					.expect(200)
 					.end(function (err, res) {
 						if (err) throw done(err);
+						assert.equal(app.testControllers.hello.callCount, 1);
 						done();
 					});
+			});
+	});
+
+	it("should timeout", function (done) {
+		request(app)
+			.get('/slow')
+			.expect('Expires', '0')
+			.expect(500)
+			.end(function (err, res) {
+				if (err) throw done(err);
+				// Travel forward in time.
+				done();
 			});
 	});
 
@@ -151,17 +164,43 @@ describe("Express Middleware", function () {
 				done();
 			});
 	});
+
+	it("should resolve locks on timeout", function (done) {
+		clock.restore();
+		app.cache.timeout = 10;
+		async.parallel([
+				function (cb) {
+					request(app)
+						.get('/slow')
+						.expect('Expires', '0')
+						.expect(500)
+						.end(cb);
+				},
+				function (cb) {
+					request(app)
+						.get('/slow')
+						.expect('Expires', '0')
+						.expect(500)
+						.end(cb);
+				}
+			],
+			function (err, results) {
+				if (err) return done(err);
+				assert.equal(app.testControllers.slow.callCount, 1);
+				done();
+			});
+	});
 });
 
 function setupExpress(app) {
 
-	var cache = new CrispHttpCache({
+	app.cache = new CrispHttpCache({
 		cacheOptions: {
 			maxSize: 50
 		}
 	});
 
-	app.use(cache.getExpressMiddleware());
+	app.use(app.cache.getExpressMiddleware());
 
 	app.testControllers = {
 		hello: sinon.spy(function (req, res) {
@@ -180,6 +219,9 @@ function setupExpress(app) {
 			res.set('expires', new Date(Date.now() + 30000).toUTCString());
 			res.sendStatus(404);
 			res.send("nope");
+		}),
+		slow: sinon.spy(function(req, res) {
+			clock.tick(70000);
 		})
 	};
 
@@ -190,4 +232,6 @@ function setupExpress(app) {
 	app.get('/inf', app.testControllers.inf);
 
 	app.get('/four04', app.testControllers.four04);
+
+	app.get('/slow', app.testControllers.slow);
 }

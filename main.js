@@ -7,6 +7,8 @@ var CrispCache = require('crisp-cache'),
  *
  * @param {{}} [options]
  * @param {boolean|undefined} [options.enabled=true] A master switch of if we should cache or not, useful to set this to false while debugging.
+ * @param {number} [options.timeout=60000] When we should count the request as over, and unlock the cache in the resultant error.
+ * @param {{status:number,headers:{}, body:*}} [options.timeoutResponse] The response that's given when a request times out.
  * @param {crispHttpCache~contextCallback} [options.shouldCache="Always true"] An async function that should resolve with a boolean
  * @param {crispHttpCache~contextCallback} [options.getKey="Use original req URL as key"] An async function that should resolve with a string key based on the request/response.
  * @param {crispHttpCache~contextCallback} [options.getTtl="Get from headers"] An async function that resolves with an integer for the TTL of response.
@@ -24,6 +26,12 @@ function CrispHttpCache(options) {
 		options = {};
 	}
 	this.enabled = (options.enabled !== undefined) ? options.enabled : true;
+	this.timeout = options.timeout || 60 * 1000;
+	this.timeoutResponse = options.timeoutResponse || {
+		status:  500,
+		headers: {'content-type': 'application/json', expires: 0},
+		body:    JSON.stringify({error: 'There was a problem with the request'})
+	};
 
 	this.shouldCache = options.shouldCache || _shouldCacheAlways;
 	this.getKey = options.getKey || _getKeyOrigUrl;
@@ -50,9 +58,8 @@ CrispHttpCache.prototype.getExpressMiddleware = function () {
 	return function (req, res, next) {
 		if (this.enabled) {
 			this.shouldCache(req, res, function (err, shouldCache) {
-				if (err) {
-					return next(new Error("CrispHttpCache - Provided options.shouldCache function returned an error."));
-				}
+				// shouldCache can be overridden, call error handler with our error, then theirs.
+				if (err) return next(new Error("CrispHttpCache - Provided options.shouldCache function returned an error.\n"+err.stack));
 
 				if (shouldCache) {
 					this.getKey(req, res, function (err, key) {
@@ -65,22 +72,19 @@ CrispHttpCache.prototype.getExpressMiddleware = function () {
 								debug("Cache hit for: " + key);
 								cacheValue.get = _getHeaders.bind(cacheValue);
 								this.compareCache(req, cacheValue, function (err, cacheOkay) {
-									if (err) {
-										next(new Error("CrispHttpCache - Provided options.compareCache returned an error."));
-									}
+									if (err) return next(new Error("CrispHttpCache - Provided options.compareCache returned an error."));
 
 									if (cacheOkay) {
 										this.cacheClientMatch(req, cacheValue, function (err, cachedExactMatch) {
 											if (cachedExactMatch) {
 												return res.sendStatus(304);
 											}
-											res.set.call(res, cacheValue.headers);
-											return res.send.call(res, cacheValue.body);
+											return applyCacheToResponse(cacheValue, res);
 										});
 									}
 									else {
 										debug("Cache values did not pass compareCache, re-running.");
-										this._interceptRes(req, res, key, this.getTtl, this.backend, this.transformHeaders);
+										this._interceptRes(req, res, key);
 										return next();
 									}
 								}.bind(this));
@@ -88,19 +92,23 @@ CrispHttpCache.prototype.getExpressMiddleware = function () {
 							}
 							else {
 								debug("Cache miss for: " + key);
-								if(this.backend._lock(key, function(){})
-								) {
-									debug("- Got lock for: " + key);
+								var acquiredLock = this.backend._lock(key, function(){});
+								if(acquiredLock) {
 									// We are the first to hit this key, go fetch
-									this._interceptRes(req, res, key, this.getTtl, this.backend, this.transformHeaders);
+									debug("- Got lock for: " + key);
+									var resTimeout = setTimeout(function() {
+										this.backend.set(key, this.timeoutResponse, {size: 0, expiresTtl: 0});
+										return applyCacheToResponse(this.timeoutResponse, res);
+									}.bind(this), this.timeout);
+
+									this._interceptRes(req, res, key, resTimeout);
 									return next();
 								}
 								else {
 									debug("- Waiting for lock: " + key);
 									this.backend._lock(key, function(key, cacheValue) {
 										debug("- Resolving lock: " + key);
-										res.set.call(res, cacheValue.headers);
-										return res.send.call(res, cacheValue.body);
+										return applyCacheToResponse(cacheValue, res);
 									});
 									return;
 								}
@@ -121,13 +129,14 @@ CrispHttpCache.prototype.getExpressMiddleware = function () {
 	}.bind(this);
 };
 
-CrispHttpCache.prototype._interceptRes = function(req, res, key, getTtl, cache) {
+CrispHttpCache.prototype._interceptRes = function(req, res, key, resTimeout) {
 	saveBody(res);
 	preFinish(res, function (res, data, cb) {
 		this.transformHeaders(res);
 		cb(null, res);
 	}.bind(this));
 	onFinished(res, function (err, res) {
+
 		var cachedEntry = {
 			status:  res.statusCode,
 			headers: res._headers,
@@ -136,19 +145,23 @@ CrispHttpCache.prototype._interceptRes = function(req, res, key, getTtl, cache) 
 
 		if (res.statusCode < 200 || res.statusCode >= 300) {
 			debug("Non 2XX status code, not saving");
-			cache._resolveLocks(key, cachedEntry);
+			this.backend._resolveLocks(key, cachedEntry);
+			if(resTimeout) {
+				clearTimeout(resTimeout);
+				return;
+			}
 			return;
 		}
 		debug("Setting cache: " + key);
 		// Update cache entry's ttl, set and send.
-		getTtl(req, res, function (err, ttl) {
+		this.getTtl(req, res, function (err, ttl) {
 			debug(" - With TTL: " + ttl);
 			// If we didn't get a hangup, we can cache it.
 			if (res.body && res.body.length) {
-				cache.set(key, cachedEntry, {size: res.body.length, expiresTtl: ttl});
+				this.backend.set(key, cachedEntry, {size: res.body.length, expiresTtl: ttl});
 			}
-		});
-	});
+		}.bind(this));
+	}.bind(this));
 };
 
 module.exports = CrispHttpCache;
@@ -184,6 +197,11 @@ function saveBody(res) {
 		res.body = Buffer.concat(chunks);
 		oldEnd.apply(res, arguments);
 	};
+}
+
+function applyCacheToResponse(cacheEntry, res) {
+	res.set(cacheEntry.headers);
+	return res.status(cacheEntry.status).send(cacheEntry.body);
 }
 
 /**
